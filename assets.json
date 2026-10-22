@@ -1,0 +1,88 @@
+{
+  "assets": [
+    {
+      "path": "models/LICENSE",
+      "source": "https://raw.githubusercontent.com/tensorflow/tfjs-models/master/LICENSE",
+      "bytes": 11357,
+      "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd"
+    },
+    {
+      "path": "models/hand-detector/group1-shard1of1.bin",
+      "source": "https://tfhub.dev/mediapipe/tfjs-model/handpose_3d/detector/full/1/group1-shard1of1.bin?tfjs-format=file",
+      "bytes": 2264316,
+      "sha256": "42aa34ed1e4d66f40707e4ba8522620ee517093616624cf1cf1ea3a033380d46"
+    },
+    {
+      "path": "models/hand-detector/model.json",
+      "source": "https://tfhub.dev/mediapipe/tfjs-model/handpose_3d/detector/full/1/model.json?tfjs-format=file",
+      "bytes": 125312,
+      "sha256": "846fd959511d3a58501d2c975f0d265824aa2af8d96bfa7d434103b5176022f2"
+    },
+    {
+      "path": "models/hand-landmarks/group1-shard1of2.bin",
+      "source": "https://tfhub.dev/mediapipe/tfjs-model/handpose_3d/landmark/full/1/group1-shard1of2.bin?tfjs-format=file",
+      "bytes": 4194304,
+      "sha256": "f39aafa43217644549dea77b85fc845e2139784b865e81ef4aa26828019dc58e"
+    },
+    {
+      "path": "models/hand-landmarks/group1-shard2of2.bin",
+      "source": "https://tfhub.dev/mediapipe/tfjs-model/handpose_3d/landmark/full/1/group1-shard2of2.bin?tfjs-format=file",
+      "bytes": 1237064,
+      "sha256": "464523210c22f996b5cb9d8ea775d5077dd442ae3b87833944a2660b50ed2b25"
+    },
+    {
+      "path": "models/hand-landmarks/model.json",
+      "source": "https://tfhub.dev/mediapipe/tfjs-model/handpose_3d/landmark/full/1/model.json?tfjs-format=file",
+      "bytes": 80978,
+      "sha256": "63af90ae19c3b36e96be83d69e723a6b9312772ccc4cbb09a52a61c34a89aca5"
+    },
+    {
+      "path": "vendor/ml5-1.4.0.min.js",
+      "source": "https://unpkg.com/ml5@1.4.0/dist/ml5.min.js",
+      "bytes": 4512403,
+      "sha256": "5facbc15115a5f0277f0e99e634ffe606f5382c9efd72d5092d9701aaaf680c5"
+    },
+    {
+      "path": "vendor/ml5-LICENSE.md",
+      "source": "https://unpkg.com/ml5@1.4.0/LICENSE.md",
+      "bytes": 3123,
+      "sha256": "0dad7e2f08ff78e71e4e55f52a9b5779bb5047d94240479d877f3d2ade42f2d2"
+    },
+    {
+      "path": "vendor/p5-1.11.11.min.js",
+      "source": "https://cdn.jsdelivr.net/npm/p5@1.11.11/lib/p5.min.js",
+      "bytes": 1057680,
+      "sha256": "1343f616bf9914da8253faae00201ea5f72772916998bc6add4c2a07e00a662c"
+    },
+    {
+      "path": "vendor/p5-LICENSE.txt",
+      "source": "https://raw.githubusercontent.com/processing/p5.js/v1.11.11/license.txt",
+      "bytes": 24480,
+      "sha256": "eb2f25f8f165d5f20682c1ce7e99ce69144ecfd80fbed8c17dfd327ecd8b6cb6"
+    },
+    {
+      "path": "vendor/rajdhani-400.ttf",
+      "source": "https://fonts.gstatic.com/s/rajdhani/v17/LDIxapCSOBg7S-QT7q4A.ttf",
+      "bytes": 351464,
+      "sha256": "fd30002d951c14f9ca6322601720b73ef4a9877167a241ab9498cc9039c596e9"
+    },
+    {
+      "path": "vendor/rajdhani-600.ttf",
+      "source": "https://fonts.gstatic.com/s/rajdhani/v17/LDI2apCSOBg7S-QT7pbYF8Os.ttf",
+      "bytes": 362824,
+      "sha256": "bcffd70c330f38f97f49fbb41cad34a1628a7852c0e6d1d1418ebc162add3144"
+    },
+    {
+      "path": "vendor/rajdhani-700.ttf",
+      "source": "https://fonts.gstatic.com/s/rajdhani/v17/LDI2apCSOBg7S-QT7pa8FsOs.ttf",
+      "bytes": 372568,
+      "sha256": "8b2fbb04ed3af38ea941d7351fc5bcf917d239d0bfb64c9bb8916510d8774495"
+    },
+    {
+      "path": "vendor/rajdhani-LICENSE.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/rajdhani/OFL.txt",
+      "bytes": 4373,
+      "sha256": "f62ef357d3a1c3d27edd35a6e1ba350e8a8d13499797964eeadefbf0b3b15d1f"
+    }
+  ]
+}

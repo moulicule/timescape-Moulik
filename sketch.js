@@ -2,7 +2,6 @@
 
 let angle = 0;
 let points = [];
-let hueVal = 0;
 let video;
 let handPose;
 let hands = [];
@@ -20,7 +19,7 @@ let snapshotState = SNAPSHOT_IDLE;
 let snapshotStart = 0;
 let transitionStart = 0;
 let snapshotCooldown = 0; // Cooldown to prevent spamming snapshots
-let fistHoldStart = 0; // Timer for gesture hold
+let fistHoldStart = null;
 let activeFistHand = null; // Track which hand is holding the fist
 let snapshotCounter = 1; // Persistent snapshot counter
 
@@ -38,6 +37,11 @@ const distance = 2; // Distance of the "4D camera"
 let scaleFactor = 150; // Size on screen
 let prevScaleFactor = 150; // For warp calculation
 const snapshotMultiplier = 2; // Capture 2x the screen size (for out-of-bounds trails)
+const maxCaptureDimension = 3840;
+let captureScale = 1;
+let pendingResize = false;
+let frameSeconds = 0;
+let animationTime = 0;
 
 // Interaction State (for smooth transitions)
 let camRotX = 0;
@@ -45,6 +49,7 @@ let camRotY = 0;
 let camRotZ = 0;
 
 function setup() {
+  pixelDensity(1);
   createCanvas(windowWidth, windowHeight, WEBGL);
   colorMode(HSB, 360, 100, 100, 100);
   scaleFactor = min(width, height) / 4;
@@ -59,10 +64,24 @@ function setup() {
     }
   });
   video.hide(); // Hide the default element so it doesn't show up at the bottom
-  handPose = ml5.handPose(video, { flipped: true }, modelLoaded);
+  handPose = ml5.handPose({
+    flipped: true,
+    runtime: 'tfjs',
+    modelType: 'full',
+    detectorModelUrl: 'models/hand-detector/model.json',
+    landmarkModelUrl: 'models/hand-landmarks/model.json'
+  });
+  handPose.ready.then(modelLoaded).catch(error => {
+    modelStatus = 'Model failed to load. Reload to retry.';
+    showDebug = true;
+    console.error(error);
+  });
 
   // Initialize off-screen buffer (Expanded Canvas)
-  artLayer = createGraphics(width * snapshotMultiplier, height * snapshotMultiplier, WEBGL);
+  const captureSize = getCaptureSize(width, height);
+  artLayer = createGraphics(captureSize.width, captureSize.height, WEBGL);
+  artLayer.pixelDensity(1);
+  captureScale = artLayer.width / (width * snapshotMultiplier);
   artLayer.colorMode(HSB, 360, 100, 100, 100);
   artLayer.clear();
 
@@ -91,14 +110,21 @@ function setup() {
   }
 
   // Initialize Snapshot Counter from LocalStorage
-  let storedCounter = localStorage.getItem('timescape_snapshot_counter');
-  if (storedCounter !== null) {
-    snapshotCounter = parseInt(storedCounter);
+  try {
+    const storedCounter = Number(localStorage.getItem('timescape_snapshot_counter'));
+    if (Number.isSafeInteger(storedCounter) && storedCounter > 0 && storedCounter <= Number.MAX_SAFE_INTEGER - 1001) {
+      snapshotCounter = storedCounter;
+    }
+  } catch (error) {
+    console.warn('Snapshot numbering will last for this session only.', error);
   }
 }
 
 function draw() {
-  video.loadPixels();
+  // Cap elapsed motion after a suspended tab; capture timers still use real time.
+  frameSeconds = Math.min(Math.max(deltaTime, 0), 100) / 1000;
+  animationTime += frameSeconds;
+  if (hands.length > 0 || handPresenceLevel > 0.5) angle += 1.2 * frameSeconds;
 
   // --- STATE MACHINE UPDATE ---
   if (snapshotState === SNAPSHOT_ENTERING) {
@@ -119,19 +145,27 @@ function draw() {
     if (elapsed >= duration) {
       snapshotState = SNAPSHOT_IDLE;
       artLayer.clear();
+      if (pendingResize) resizeScene();
     }
   } else if (snapshotState === SNAPSHOT_ACTIVE) {
     sceneOpacity = 0;
     let elapsed = millis() - snapshotStart;
     if (elapsed > 10000) {
       let filename = 'timescape_' + (1000 + snapshotCounter) + '.png';
-      artLayer.save(filename);
-
-      snapshotCounter++;
-      localStorage.setItem('timescape_snapshot_counter', snapshotCounter);
-
+      // Leave ACTIVE before saving so a failure cannot retry every frame.
       snapshotState = SNAPSHOT_EXITING;
       transitionStart = millis();
+      try {
+        Promise.resolve(artLayer.save(filename)).catch(snapshotSaveFailed);
+      } catch (error) {
+        snapshotSaveFailed(error);
+      }
+      snapshotCounter = snapshotCounter < Number.MAX_SAFE_INTEGER - 1001 ? snapshotCounter + 1 : 1;
+      try {
+        localStorage.setItem('timescape_snapshot_counter', String(snapshotCounter));
+      } catch (error) {
+        console.warn('Could not remember the snapshot number.', error);
+      }
     }
   } else {
     sceneOpacity = 100;
@@ -146,7 +180,7 @@ function draw() {
     push();
     translate(0, 0, 0);
     noStroke();
-    fill(0, 0, 0, 10); // Trail fade
+    fill(0, 0, 0, 100 * smoothing(0.1));
     resetMatrix();
     camera(0, 0, (height / 2.0) / tan(PI * 30.0 / 180.0), 0, 0, 0, 0, 1, 0);
     plane(width * 2, height * 2);
@@ -176,7 +210,7 @@ function draw() {
   }
 
   // 3. Draw Background Elements (Stars)
-  let zoomSpeed = scaleFactor - prevScaleFactor;
+  let zoomSpeed = frameSeconds > 0 ? (scaleFactor - prevScaleFactor) / (frameSeconds * 60) : 0;
   prevScaleFactor = scaleFactor;
 
   if (sceneOpacity > 0) {
@@ -190,9 +224,9 @@ function draw() {
   // If hands detected, fade in fast. If lost, fade out slow.
   let targetPresence = (hands.length > 0) ? 100 : 0;
   if (targetPresence > handPresenceLevel) {
-    handPresenceLevel = lerp(handPresenceLevel, targetPresence, 0.2); // Fast fade in
+    handPresenceLevel = lerp(handPresenceLevel, targetPresence, smoothing(0.2));
   } else {
-    handPresenceLevel -= 2; // Slow linear fade out (approx 1 sec from 100 to 0 @ 60fps)
+    handPresenceLevel -= 120 * frameSeconds;
   }
   handPresenceLevel = constrain(handPresenceLevel, 0, 100);
 
@@ -204,16 +238,9 @@ function draw() {
     if (hands.length > 0) {
       drawHands(finalOpacity);
       // Draw Progress Circle only if actively holding fist and hands are tracked
-      if (fistHoldStart > 0 && activeFistHand) {
+      if (fistHoldStart !== null && activeFistHand) {
         drawFistProgress(activeFistHand);
       }
-    } else {
-      // Optional: Can verify if we want to show "ghost" hands fading out.
-      // User asked for Tesseract fade out. Usually hands fading out too looks better.
-      // We can draw hands using the LAST KNOWN positions if we wanted, but 'hands' array is empty when lost.
-      // So we can't draw hands if hands.length == 0 unless we cache them.
-      // For now, let's just let the Tesseract fade out. The Hands will disappear instantly (as they are the input),
-      // but the Tesseract (the output) will linger.
     }
   }
 
@@ -221,8 +248,6 @@ function draw() {
   if (snapshotState !== SNAPSHOT_ACTIVE) {
     if (finalOpacity > 0.5) {
       drawingContext.clear(drawingContext.DEPTH_BUFFER_BIT);
-      // Pass the smooth opacity
-      // We don't pass 'null' for pg?? Wait, drawTesseract check: function drawTesseract(pg, opacity = 100)
       drawTesseract(null, finalOpacity);
     }
   }
@@ -272,7 +297,7 @@ function drawStars(opacity, zoomSpeed) {
     let s1 = stars[i];
 
     // Update Z based on Warp
-    s1.z += zoomSpeed * 4;
+    s1.z += zoomSpeed * 4 * frameSeconds * 60;
     if (s1.z > 0) s1.z = -1000;
     if (s1.z < -1000) s1.z = 0;
 
@@ -316,11 +341,34 @@ function drawStars(opacity, zoomSpeed) {
   pop();
 }
 
+function smoothing(amount) {
+  return 1 - Math.pow(1 - amount, frameSeconds * 60);
+}
+
+function snapshotSaveFailed(error) {
+  modelStatus = 'Snapshot save failed. Check browser downloads.';
+  showDebug = true;
+  console.error(error);
+}
+
+function lerpAngle(current, target, amount) {
+  const difference = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+  return current + difference * amount;
+}
+
+function startSnapshot() {
+  if (snapshotState !== SNAPSHOT_IDLE) return;
+  snapshotState = SNAPSHOT_ENTERING;
+  transitionStart = millis();
+  snapshotCooldown = millis() + 16000; // 1s entry, 10s capture, 2s exit, 3s buffer.
+  fistHoldStart = null;
+  activeFistHand = null;
+}
+
 function updateInteraction() {
   let targetRotX = 0;
   let targetRotY = 0;
   let targetRotZ = 0;
-  let newScale = scaleFactor;
 
   if (hands.length > 0) {
     let sumX = 0;
@@ -340,61 +388,38 @@ function updateInteraction() {
       let h1 = hands[0].keypoints[8];
       let h2 = hands[1].keypoints[8];
       let d = dist(h1.x, h1.y, h2.x, h2.y);
-      newScale = map(d, 50, 400, 50, 400);
-      scaleFactor = lerp(scaleFactor, newScale, 0.1);
+      scaleFactor = lerp(scaleFactor, d, smoothing(0.1));
       let angleBetween = atan2(h2.y - h1.y, h2.x - h1.x);
       targetRotZ = angleBetween;
     }
 
-    camRotX = lerp(camRotX, targetRotX, 0.1);
-    camRotY = lerp(camRotY, targetRotY, 0.1);
-    camRotZ = lerp(camRotZ, targetRotZ, 0.1);
+    camRotX = lerpAngle(camRotX, targetRotX, smoothing(0.1));
+    camRotY = lerpAngle(camRotY, targetRotY, smoothing(0.1));
+    camRotZ = lerpAngle(camRotZ, targetRotZ, smoothing(0.1));
 
     // 3. GESTURE DETECTION (Snapshot Trigger)
     // Check if cooldown has passed
     if (snapshotState === SNAPSHOT_IDLE && millis() > snapshotCooldown) {
-      let fistDetected = false;
+      activeFistHand = hands.find(detectFist) || null;
 
-      for (let hand of hands) {
-        if (detectFist(hand)) {
-          fistDetected = true;
-          break;
-        }
-      }
-
-      if (fistDetected) {
-        // Start timer if not started
-        if (fistHoldStart === 0) {
+      if (activeFistHand) {
+        if (fistHoldStart === null) {
           fistHoldStart = millis();
         }
-
-        // Find which hand caused the trigger for visualization
-        // (Just picking the first valid one if multiple)
-        activeFistHand = null;
-        for (let hand of hands) {
-          if (detectFist(hand)) {
-            activeFistHand = hand;
-            break;
-          }
-        }
-
-        // Check duration
-        if (millis() - fistHoldStart > 3000) {
-          // TRIGGER SNAPSHOT
-          snapshotState = SNAPSHOT_ENTERING;
-          transitionStart = millis();
-          // Set cooldown (10s recording + 2s exit + 3s buffer = 15s)
-          snapshotCooldown = millis() + 15000;
-          fistHoldStart = 0; // Reset timer
-          activeFistHand = null;
-          console.log("Fist Held for 3s! Starting Snapshot...");
+        if (millis() - fistHoldStart >= 3000) {
+          startSnapshot();
         }
       } else {
-        // Reset timer if fist is released
-        fistHoldStart = 0;
+        fistHoldStart = null;
         activeFistHand = null;
       }
+    } else {
+      fistHoldStart = null;
+      activeFistHand = null;
     }
+  } else {
+    fistHoldStart = null;
+    activeFistHand = null;
   }
 }
 
@@ -478,7 +503,7 @@ function drawFistProgress(hand) {
     fill(0, 0, 100);   // White
 
     // Pulse effect
-    let sSize = 4 + sin(frameCount * 0.2 + i) * 2;
+    let sSize = 4 + sin(animationTime * 12 + i) * 2;
     circle(sx, sy, sSize);
   }
 
@@ -548,8 +573,7 @@ function drawTesseract(pg, opacity = 100) {
   ctx.rotateX(camRotX);
   ctx.rotateY(camRotY);
   ctx.rotateZ(camRotZ);
-
-  angle += 0.02;
+  if (pg) ctx.scale(captureScale);
 
   let projected3D = [];
 
@@ -598,11 +622,11 @@ function drawTesseract(pg, opacity = 100) {
 
           // Create a gradient color based on the vertex index and time
           // Oscillate between Cyan (190) and Purple (290)
-          let wave = sin(frameCount * 0.02 + i * 0.5);
+          let wave = sin(animationTime * 1.2 + i * 0.5);
           let hueSpace = map(wave, -1, 1, 190, 290);
 
           // Saturation and Brightness can also pulse slightly
-          let satSpace = map(cos(frameCount * 0.03 + j), -1, 1, 80, 100);
+          let satSpace = map(cos(animationTime * 1.8 + j), -1, 1, 80, 100);
           let brightSpace = 100;
 
           ctx.stroke(hueSpace, satSpace, brightSpace, opacity);
@@ -639,10 +663,7 @@ function keyPressed() {
     showDebug = !showDebug;
   }
   if (key === 's' || key === 'S') {
-    if (snapshotState === SNAPSHOT_IDLE) {
-      snapshotState = SNAPSHOT_ENTERING;
-      transitionStart = millis();
-    }
+    startSnapshot();
   }
 }
 
@@ -653,13 +674,52 @@ function modelLoaded() {
 }
 
 function windowResized() {
+  if (snapshotState !== SNAPSHOT_IDLE) {
+    pendingResize = true;
+    return;
+  }
+  resizeScene();
+}
+
+function getCaptureSize(viewWidth, viewHeight) {
+  const limit = Math.min(maxCaptureDimension, drawingContext.getParameter(drawingContext.MAX_TEXTURE_SIZE));
+  const ratio = Math.min(snapshotMultiplier, limit / Math.max(viewWidth, viewHeight));
+  return { width: Math.max(1, Math.round(viewWidth * ratio)), height: Math.max(1, Math.round(viewHeight * ratio)) };
+}
+
+function resizeScene() {
+  pendingResize = false;
   resizeCanvas(windowWidth, windowHeight);
-  artLayer.resizeCanvas(windowWidth * snapshotMultiplier, windowHeight * snapshotMultiplier);
+  const captureSize = getCaptureSize(width, height);
+  artLayer.resizeCanvas(captureSize.width, captureSize.height);
+  captureScale = artLayer.width / (width * snapshotMultiplier);
   scaleFactor = min(width, height) / 4;
+  prevScaleFactor = scaleFactor;
 }
 
 function gotHands(results) {
-  hands = results;
+  const ordered = results.slice();
+  if (ordered.length === 2) {
+    if (hands.length === 2) {
+      const distinctLabels = pair => pair[0].handedness && pair[1].handedness && pair[0].handedness !== pair[1].handedness;
+      if (distinctLabels(ordered) && distinctLabels(hands) && ordered.some(hand => hand.handedness === hands[0].handedness)) {
+        if (ordered[0].handedness !== hands[0].handedness) ordered.reverse();
+      } else {
+        // Match wrists when labels are ambiguous, preserving order as labels return.
+        const distanceSq = (a, b) => (a.keypoints[0].x - b.keypoints[0].x) ** 2 + (a.keypoints[0].y - b.keypoints[0].y) ** 2;
+        const same = distanceSq(ordered[0], hands[0]) + distanceSq(ordered[1], hands[1]);
+        const swapped = distanceSq(ordered[0], hands[1]) + distanceSq(ordered[1], hands[0]);
+        if (swapped < same) ordered.reverse();
+      }
+    } else {
+      ordered.sort((a, b) => a.keypoints[0].x - b.keypoints[0].x);
+    }
+  }
+  hands = ordered;
+  if (hands.length === 0) {
+    fistHoldStart = null;
+    activeFistHand = null;
+  }
 }
 
 class P4Vector {
