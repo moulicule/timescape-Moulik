@@ -29,12 +29,28 @@ Two hands keep their previous order using Left/Right labels; ambiguous labels fa
 With Node.js 18 or newer:
 
 ```sh
-node --test tests/sketch.test.cjs
+node --test tests/*.test.cjs
 ```
 
-These checks cover continuous gesture holds, hand ordering, angle wrapping, storage and save failures, capture transitions, deferred resizing, frame-rate independence, and local asset completeness. Rendering calls are stubbed; they do not replace a webcam test.
+These checks cover continuous gesture holds, hand ordering, angle wrapping, storage and save failures, capture transitions, deferred resizing, frame-rate independence, local asset completeness, and matching wireframe geometry and colors after batching. Rendering calls are stubbed; they do not replace a webcam test.
 
 Before an exhibition, launch with a fresh browser cache and internet disconnected, check one- and two-hand gestures, interrupt a fist hold, resize during capture, and save several images. Run a sustained session at the final projector resolution to check temperature, frame rate, and browser download permissions.
+
+## Rendering performance
+
+The tesseract's 128 individual line submissions now use one `LINES` batch. Both color directions, parallel offsets, and draw order are kept because they affect translucent trails. Projected coordinates reuse 16 objects, rotation trigonometry runs once per draw, and edge colors are calculated once per vertex. The beads retain their original sphere detail and lighting. Hand landmarks are mapped to screen coordinates once per hand, then reused for all five glow passes; finger joins and glow widths are retained. The star pass skips 200 unused fill updates and reuses its stroke width.
+
+Open <http://127.0.0.1:8000/tests/render.html> and click **Run rendering benchmark** to measure one hand, two hands, and capture with synthetic input. No camera access or model inference is used. Each case warms up for 30 frames and measures 90 frames, reporting median and 95th-percentile JavaScript draw time and GPU draw submissions across both canvases. These timings exclude GPU completion, display refresh, inference, and PNG export; they are not an overall frame-rate measurement.
+
+A final paired comparison in the Codex browser at 1280×720 (2560×1440 capture):
+
+| Case | GPU submissions before → after | Median draw time before → after |
+| --- | --- | --- |
+| One hand | 373 → 246 | 3.6 → 3.2 ms |
+| Two hands | 398 → 271 | 4.4 → 3.8 ms |
+| Capture | 145 → 18 | 2.7 → 2.2 ms |
+
+The consistent saving is 127 fewer GPU submissions per frame: about 32–34% in live view and 88% during capture. Draw times varied across repeated runs, especially during browser/driver warm-up, so these are observations rather than fixed speedups or frame-rate promises. Stars still use individual point submissions to preserve their independent brightness and flicker; batching them in this p5 version would require a custom point shader or changing their appearance.
 
 ## Bundled assets
 

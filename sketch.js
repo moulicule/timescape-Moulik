@@ -2,6 +2,17 @@
 
 let angle = 0;
 let points = [];
+const projected3D = Array.from({ length: 16 }, () => ({ x: 0, y: 0, z: 0 }));
+const tesseractEdges = [];
+const edgeHues = new Float64Array(16);
+const edgeSaturations = new Float64Array(16);
+const handFingers = [
+  [0, 1, 2, 3, 4],
+  [0, 5, 6, 7, 8],
+  [0, 9, 10, 11, 12],
+  [0, 13, 14, 15, 16],
+  [0, 17, 18, 19, 20]
+];
 let video;
 let handPose;
 let hands = [];
@@ -96,7 +107,11 @@ function setup() {
     let y = (i & 2) ? 1 : -1;
     let z = (i & 4) ? 1 : -1;
     let w = (i & 8) ? 1 : -1;
-    points.push(new P4Vector(x, y, z, w));
+    points.push({ x, y, z, w });
+    for (let j = 0; j < 16; j++) {
+      const diff = i ^ j;
+      if (diff !== 0 && (diff & (diff - 1)) === 0) tesseractEdges.push([i, j]);
+    }
   }
 
   // Generate Stars
@@ -286,6 +301,8 @@ function updateHtmlUi() {
 
 function drawStars(opacity, zoomSpeed) {
   push();
+  const warping = abs(zoomSpeed) > 0.5;
+  const streakLen = zoomSpeed * 10;
 
   // --- OPTIMIZATION: Limited Neighbor Check ---
   strokeWeight(1);
@@ -322,19 +339,17 @@ function drawStars(opacity, zoomSpeed) {
     // Draw Stars
     let b = s1.brightness + random(-20, 20);
     let finalB = map(b, 0, 255, 0, 100);
-    fill(finalB, opacity);
+    // Preserve the first connection's width, then reuse the star stroke width.
+    if (i === 0) strokeWeight(warping ? 2 : 3);
 
     // Hyperspace Warp vs Static Point
-    if (abs(zoomSpeed) > 0.5) {
+    if (warping) {
       // Keep line for warp effect
       stroke(finalB, opacity);
-      strokeWeight(2);
-      let streakLen = zoomSpeed * 10;
       line(s1.x, s1.y, s1.z, s1.x, s1.y, s1.z - streakLen);
     } else {
       // OPTIMIZATION: Use point() instead of sphere()
       stroke(finalB, opacity);
-      strokeWeight(3);
       point(s1.x, s1.y, s1.z);
     }
   }
@@ -575,86 +590,60 @@ function drawTesseract(pg, opacity = 100) {
   ctx.rotateZ(camRotZ);
   if (pg) ctx.scale(captureScale);
 
-  let projected3D = [];
+  const sinZW = Math.sin(angle);
+  const cosZW = Math.cos(angle);
+  const sinXY = Math.sin(angle * 0.5);
+  const cosXY = Math.cos(angle * 0.5);
+
+  ctx.noStroke();
+  if (opacity < 100) {
+    ctx.fill(200, 10, 80, opacity);
+  } else {
+    ctx.specularMaterial(200, 10, 80);
+    ctx.shininess(50);
+  }
 
   for (let i = 0; i < points.length; i++) {
-    let v = points[i];
-    let rotated = rotateZW(v, angle);
-    rotated = rotateXY(rotated, angle * 0.5);
-    let wVal = 1 / (distance - rotated.w);
-    let p = createVector(
-      rotated.x * wVal,
-      rotated.y * wVal,
-      rotated.z * wVal
-    );
-    p.mult(scaleFactor);
-    projected3D.push(p);
+    const v = points[i];
+    const rotatedZ = v.z * cosZW - v.w * sinZW;
+    const rotatedW = v.z * sinZW + v.w * cosZW;
+    const projectionScale = scaleFactor / (distance - rotatedW);
+    const p = projected3D[i];
+    p.x = (v.x * cosXY - v.y * sinXY) * projectionScale;
+    p.y = (v.x * sinXY + v.y * cosXY) * projectionScale;
+    p.z = rotatedZ * projectionScale;
+    edgeHues[i] = 240 + 50 * Math.sin(animationTime * 1.2 + i * 0.5);
+    edgeSaturations[i] = 90 + 10 * Math.cos(animationTime * 1.8 + i);
 
     ctx.push();
     ctx.translate(p.x, p.y, p.z);
-    ctx.noStroke();
-
-    // --- METALLIC MATERIAL (Vertices) ---
-    // Silvery/Bluish white specular material
-    if (opacity < 100) {
-      // If fading out, basic fill
-      ctx.fill(200, 10, 80, opacity);
-    } else {
-      ctx.specularMaterial(200, 10, 80);
-      ctx.shininess(50);
-    }
-
-    ctx.sphere(6); // Slightly larger beads for specularity
+    ctx.sphere(6);
     ctx.pop();
   }
 
-  // --- SPACE THEMED LINES ---
-  // Gradient from Cyan (200) to Purple (280) based on position/index
-  ctx.strokeWeight(1); // Thinner lines
-
-  for (let i = 0; i < 16; i++) {
-    for (let j = 0; j < 16; j++) {
-      if (i !== j) {
-        let diff = i ^ j;
-        if ((diff & (diff - 1)) == 0) {
-          let a = projected3D[i];
-          let b = projected3D[j];
-
-          // Create a gradient color based on the vertex index and time
-          // Oscillate between Cyan (190) and Purple (290)
-          let wave = sin(animationTime * 1.2 + i * 0.5);
-          let hueSpace = map(wave, -1, 1, 190, 290);
-
-          // Saturation and Brightness can also pulse slightly
-          let satSpace = map(cos(animationTime * 1.8 + j), -1, 1, 80, 100);
-          let brightSpace = 100;
-
-          ctx.stroke(hueSpace, satSpace, brightSpace, opacity);
-
-          // --- DOUBLE PARALLEL LINES LOGIC ---
-          // Calculate vector along the line
-          let v = createVector(b.x - a.x, b.y - a.y, b.z - a.z);
-          // Arbitrary up vector for cross product
-          let up = createVector(0, 1, 0);
-
-          // Calculate perpendicular offset
-          let offset = v.cross(up);
-
-          // Handle case where line is parallel to up vector
-          if (offset.magSq() < 0.001) {
-            offset = v.cross(createVector(0, 0, 1));
-          }
-
-          offset.normalize();
-          offset.mult(4); // Spacing distance
-
-          // Draw two parallel lines
-          ctx.line(a.x + offset.x, a.y + offset.y, a.z + offset.z, b.x + offset.x, b.y + offset.y, b.z + offset.z);
-          ctx.line(a.x - offset.x, a.y - offset.y, a.z - offset.z, b.x - offset.x, b.y - offset.y, b.z - offset.z);
-        }
-      }
+  ctx.strokeWeight(1);
+  ctx.noFill();
+  ctx.beginShape(LINES);
+  // Keep both color directions and their order: they also affect translucent trails.
+  for (const [i, j] of tesseractEdges) {
+    const a = projected3D[i];
+    const b = projected3D[j];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dz = b.z - a.z;
+    let ox = -dz, oy = 0, oz = dx;
+    if (ox * ox + oz * oz < 0.001) {
+      ox = dy; oy = -dx; oz = 0;
     }
+    const offsetScale = 4 / (Math.hypot(ox, oy, oz) || 1);
+    ox *= offsetScale; oy *= offsetScale; oz *= offsetScale;
+    ctx.stroke(edgeHues[i], edgeSaturations[j], 100, opacity);
+    ctx.vertex(a.x + ox, a.y + oy, a.z + oz);
+    ctx.vertex(b.x + ox, b.y + oy, b.z + oz);
+    ctx.vertex(a.x - ox, a.y - oy, a.z - oz);
+    ctx.vertex(b.x - ox, b.y - oy, b.z - oz);
   }
+  ctx.endShape();
   ctx.pop();
 }
 
@@ -722,35 +711,11 @@ function gotHands(results) {
   }
 }
 
-class P4Vector {
-  constructor(x, y, z, w) {
-    this.x = x;
-    this.y = y;
-    this.z = z;
-    this.w = w;
-  }
-}
-
-function rotateZW(p, theta) {
-  let newZ = p.z * Math.cos(theta) - p.w * Math.sin(theta);
-  let newW = p.z * Math.sin(theta) + p.w * Math.cos(theta);
-  return new P4Vector(p.x, p.y, newZ, newW);
-}
-
-function rotateXY(p, theta) {
-  let newX = p.x * Math.cos(theta) - p.y * Math.sin(theta);
-  let newY = p.x * Math.sin(theta) + p.y * Math.cos(theta);
-  return new P4Vector(newX, newY, p.z, p.w);
-}
-
 function drawNeonHand(hand, opacity = 100) {
-  let fingers = [
-    [0, 1, 2, 3, 4],
-    [0, 5, 6, 7, 8],
-    [0, 9, 10, 11, 12],
-    [0, 13, 14, 15, 16],
-    [0, 17, 18, 19, 20]
-  ];
+  const screenPoints = hand.keypoints.map(kp => ({
+    x: kp.x / video.width * width - width / 2,
+    y: kp.y / video.height * height - height / 2
+  }));
 
   push();
   noFill();
@@ -761,38 +726,35 @@ function drawNeonHand(hand, opacity = 100) {
 
   strokeWeight(60);
   stroke(190, 100, 100, 1 * alphaScale);
-  drawSkeleton(hand, fingers);
+  drawSkeleton(screenPoints);
 
   strokeWeight(40);
   stroke(190, 100, 100, 2 * alphaScale);
-  drawSkeleton(hand, fingers);
+  drawSkeleton(screenPoints);
 
   strokeWeight(25);
   stroke(190, 100, 100, 4 * alphaScale);
-  drawSkeleton(hand, fingers);
+  drawSkeleton(screenPoints);
 
   strokeWeight(14);
   stroke(190, 80, 100, 10 * alphaScale);
-  drawSkeleton(hand, fingers);
+  drawSkeleton(screenPoints);
 
   strokeWeight(7);
   stroke(190, 0, 100, 20 * alphaScale);
-  drawSkeleton(hand, fingers);
+  drawSkeleton(screenPoints);
 
   pop();
 }
 
 
 
-function drawSkeleton(hand, fingers) {
-  for (let finger of fingers) {
+function drawSkeleton(screenPoints) {
+  for (const finger of handFingers) {
     beginShape();
-    for (let i of finger) {
-      let kp = hand.keypoints[i];
-      // Map based on actual video dimensions
-      let wx = map(kp.x, 0, video.width, -width / 2, width / 2);
-      let wy = map(kp.y, 0, video.height, -height / 2, height / 2);
-      vertex(wx, wy, -50);
+    for (const i of finger) {
+      const kp = screenPoints[i];
+      vertex(kp.x, kp.y, -50);
     }
     endShape();
   }

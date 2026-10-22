@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Timescape rendering benchmark</title>
+  <link rel="stylesheet" href="../style.css">
+  <style>
+    #benchmark { position: fixed; z-index: 20; top: 12px; left: 12px; max-width: 540px; padding: 16px; background: #111e; color: white; }
+    #results { white-space: pre-wrap; font-family: monospace; }
+  </style>
+  <script src="../vendor/p5-1.11.11.min.js"></script>
+</head>
+<body>
+  <aside id="benchmark">
+    <strong>Rendering only · synthetic hands · no camera or inference</strong>
+    <p>30 warm-up frames + 90 measured frames per case. CPU time measures the JavaScript draw call, not GPU completion or webcam tracking.</p>
+    <button id="run">Run rendering benchmark</button>
+    <output id="results">Ready</output>
+  </aside>
+  <div id="hud" class="hidden"><span id="model-status"></span><span id="recording-indicator" class="hidden"></span></div>
+  <script src="../sketch.js"></script>
+  <script>
+    const ml5 = { handPose: () => ({ ready: Promise.resolve(), detectStart() {} }) };
+    const installationSetup = setup;
+    const installationDraw = draw;
+    const cases = ['One hand', 'Two hands', 'Snapshot'];
+    const results = [];
+    let running = false, caseIndex = 0, sample = 0, time = 0, drawCalls = 0;
+    let times = [], submissions = [];
+    let initialStars;
+    const output = document.querySelector('#results');
+
+    function syntheticHand(offset, handedness) {
+      const coordinates = [[640,450],[605,410],[570,370],[545,340],[520,320],[600,340],[590,270],[580,210],[575,160],[640,330],[640,250],[640,180],[640,125],[680,340],[690,265],[700,205],[705,160],[715,365],[740,310],[755,265],[765,230]];
+      return { handedness, keypoints: coordinates.map(([x, y]) => ({ x: x + offset, y })) };
+    }
+
+    setup = function () {
+      randomSeed(42);
+      const capture = createCapture;
+      createCapture = () => ({ width: 1280, height: 720, hide() {} });
+      installationSetup();
+      createCapture = capture;
+      initialStars = stars.map(star => ({ ...star }));
+      for (const gl of [drawingContext, artLayer.drawingContext]) {
+        for (const name of ['drawArrays', 'drawElements', 'drawArraysInstanced', 'drawElementsInstanced']) {
+          if (!gl[name]) continue;
+          const original = gl[name].bind(gl);
+          gl[name] = (...args) => { drawCalls++; return original(...args); };
+        }
+      }
+      noLoop();
+    };
+
+    function startCase() {
+      sample = 0; times = []; submissions = [];
+      angle = 0; animationTime = 0; camRotX = camRotY = camRotZ = 0;
+      scaleFactor = prevScaleFactor = Math.min(width, height) / 4;
+      handPresenceLevel = 100;
+      stars = initialStars.map(star => ({ ...star }));
+      gotHands(caseIndex === 1 ? [syntheticHand(-160, 'Left'), syntheticHand(160, 'Right')] : [syntheticHand(0, 'Left')]);
+      snapshotState = caseIndex === 2 ? SNAPSHOT_ACTIVE : SNAPSHOT_IDLE;
+      snapshotStart = time;
+      artLayer.clear(); background(0); randomSeed(1234);
+      output.textContent = `Measuring ${cases[caseIndex]}…`;
+    }
+
+    draw = function () {
+      if (!running) return;
+      deltaTime = 1000 / 60;
+      time += deltaTime;
+      millis = () => time;
+      drawCalls = 0;
+      const start = performance.now();
+      installationDraw();
+      const elapsed = performance.now() - start;
+      if (sample++ >= 30) { times.push(elapsed); submissions.push(drawCalls); }
+      if (sample < 120) return;
+      times.sort((a, b) => a - b);
+      results.push({ case: cases[caseIndex], medianMs: +times[45].toFixed(2), p95Ms: +times[85].toFixed(2), meanDrawCalls: +(submissions.reduce((a, b) => a + b, 0) / submissions.length).toFixed(1) });
+      if (++caseIndex < cases.length) return startCase();
+      running = false; noLoop();
+      output.textContent = `Complete at ${width}×${height}\n${JSON.stringify(results, null, 2)}`;
+      document.querySelector('#run').disabled = false;
+    };
+
+    document.querySelector('#run').onclick = () => {
+      results.length = 0; caseIndex = 0; time = 0; running = true;
+      document.querySelector('#run').disabled = true;
+      startCase(); loop();
+    };
+  </script>
+</body>
+</html>
